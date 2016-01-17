@@ -14,12 +14,14 @@
 		CLASSNAME_SINGLE: 'vse-visible-space-box-singlebyte',
 		CLASSNAME_MULTI: 'vse-visible-space-box-multibyte',
 		CLASSNAME_TAB: 'vse-visible-space-box-tabchar',
+		EVENT_TYPES: {
+			CHANGE_VALUE: 'change_value',
+		},
 	};
 	var bindCall = function(fn) {
 		return fn.call.bind(fn);
 	};
 	var forEach = bindCall(Array.prototype.forEach);
-	var some = bindCall(Array.prototype.some);
 	var findIndex = bindCall(Array.prototype.findIndex);
 	function isTextNode(node) {
 		return document.TEXT_NODE === node.nodeType;
@@ -47,22 +49,6 @@
 	}
 	function getSpaceCharIndex(text) {
 		return findIndex(text, isSpaceChar);
-	}
-	function incSpaceCharIndex(text) {
-		return getSpaceCharIndex(text) > -1;
-	}
-	function hasVisibleTransformTarget(node) {
-		if (isTextNode(node)) {
-			//chech add space-class taget
-			return incSpaceCharIndex(node.textContent);
-		} else if (isElementNode(node)) {
-			//check remove space-class target
-			if (isVisibleSpaceSpan(node)) {
-				return !isSpaceChar(node.innerText);
-			}
-			return some(node.childNodes, hasVisibleTransformTarget);
-		}
-		return false;
 	}
 	function removeHighlight(node) {
 		var parent = node.parentElement;
@@ -109,33 +95,57 @@
 		}
 	}
 	function refreshHighlight(node) {
-		var parentModFlg = false;
-
 		if (isTextNode(node)) {
 			//add space-class target
-			highlight(node);
+			if (highlight(node)) {
+				return {
+					change: true,
+					changeChild: true,
+				};
+			} else {
+				return {
+					change: false,
+					changeChild: false,
+				};
+			}
 		} else if (isElementNode(node)) {
 			//remove space-class target
 			if (isVisibleSpaceSpan(node)) {
 				if (isSpaceChar(node.innerText)) {
-					return false;
+					return {
+						change: false,
+						changeChild: false,
+					};
 				}
 				var textNode = removeHighlight(node);
 				if (textNode) {
 					highlight(textNode);
 				}
-				return true;
+				return {
+					change: true,
+					changeChild: true,
+				};
 			} else {
+				var change = false;
 				var normalizeFlg = false;
 				forEach(node.childNodes, function(c) {
-					normalizeFlg = refreshHighlight(c) || normalizeFlg;
+					var ret = refreshHighlight(c);
+					change = change || ret.change;
+					normalizeFlg = normalizeFlg || ret.changeChild;
 				});
 				if (normalizeFlg) {
 					node.normalize();
 				}
+				return {
+					change: change,
+					changeChild: false,
+				};
 			}
 		}
-		return parentModFlg;
+		return {
+			change: false,
+			changeChild: false,
+		};
 	}
 	function getTextLength(node) {
 		var text = node.innerText || node.textContent;
@@ -226,8 +236,13 @@
 		selection.removeAllRanges();
 		selection.addRange(newRange);
 	}
+	var seq = 0;
+	var newSeq = function() {
+		return seq++;
+	};
 
 	var VisibleSpacesEditor = function(edit) {
+		var fireEvnet;
 		var lastHtml = edit.innerHTML;
 		function isModify() {
 			var html = edit.innerHTML;
@@ -238,15 +253,14 @@
 			return true;
 		}
 		function onChangeHighlight() {
-			//TODO onChange
+			fireEvnet(CONSTS.EVENT_TYPES.CHANGE_VALUE);
 
-			if (!hasVisibleTransformTarget(edit)) {
-				return false;
+			var ret;
+			if ((ret = refreshHighlight(edit)).changeChild) {
+				edit.normalize();
 			}
 
-			refreshHighlight(edit);
-
-			return true;
+			return ret.change;
 		}
 		function isIncEdit(node) {
 			var e = node;
@@ -258,7 +272,7 @@
 			}
 			return false;
 		}
-		function onChangeHighlightCaretFix() {
+		function onChangeHighlightCaretFix(e) {
 			if (!isModify()) {
 				return;
 			}
@@ -280,6 +294,17 @@
 		}
 		this._edit = edit;
 		this._highlight = onChangeHighlight;
+		this._callbackMap = {};
+		this._elementEvents = {};
+		var addElementEvent = function(key, fn) {
+			this._elementEvents[key] = fn;
+			edit.addEventListener(key, fn);
+		}.bind(this);
+		fireEvnet = function(eventType) {
+			forEach(this._callbackMap[eventType] || [], function(fn) {
+				fn.bind(this)();
+			}.bind(this));
+		}.bind(this);
 
 		edit.style['white-space'] = 'pre';
 		edit.style['-webkit-user-modify'] = '';
@@ -287,22 +312,22 @@
 
 		var isComposition = false;
 		//blur keypress keyup paste copy cut mouseup
-		edit.addEventListener('blur', function() {
+		addElementEvent('blur', function() {
 			if (isModify()) {
 				onChangeHighlight();
 			}
 		});
-		edit.addEventListener('keydown', function(e) {
+		addElementEvent('keydown', function(e) {
 			if (!isComposition) {
-				onChangeHighlightCaretFix();
+				onChangeHighlightCaretFix(e);
 			}
 		});
-		edit.addEventListener('keyup', function(e) {
+		addElementEvent('keyup', function(e) {
 			if (!isComposition) {
-				onChangeHighlightCaretFix();
+				onChangeHighlightCaretFix(e);
 			}
 		});
-		edit.addEventListener('paste', function(e) {
+		addElementEvent('paste', function(e) {
 			setTimeout(function() {
 				var selection = getSelectionObject(edit);
 				edit.innerText = edit.innerText.replace('\u00A0', ' ');
@@ -315,16 +340,16 @@
 				setSelectionObject(edit, selection);
 			}, 0);
 		});
-		edit.addEventListener('copy', onChangeHighlightCaretFix);
-		edit.addEventListener('cut', onChangeHighlightCaretFix);
-		edit.addEventListener('mouseup', onChangeHighlightCaretFix);
+		addElementEvent('copy', onChangeHighlightCaretFix);
+		addElementEvent('cut', onChangeHighlightCaretFix);
+		addElementEvent('mouseup', onChangeHighlightCaretFix);
 
-		edit.addEventListener('compositionstart', function(e) {
+		addElementEvent('compositionstart', function(e) {
 			isComposition = true;
 		});
-		edit.addEventListener('compositionend', function(e) {
+		addElementEvent('compositionend', function(e) {
 			isComposition = false;
-			onChangeHighlightCaretFix();
+			onChangeHighlightCaretFix(e);
 		});
 	};
 
@@ -334,6 +359,18 @@
 	VisibleSpacesEditor.prototype.setValue = function(value) {
 		this._edit.innerText = value;
 		this._highlight();
+	};
+	VisibleSpacesEditor.prototype.EVENT_TYPES = CONSTS.EVENT_TYPES;
+	VisibleSpacesEditor.prototype.on = function(eventType, fn) {
+		var funcs = this._callbackMap[eventType] || (this._callbackMap[eventType] = []);
+		funcs.push(fn);
+	};
+	VisibleSpacesEditor.prototype.dispose = function() {
+		for (var key in this._elementEvents) {
+			this._edit.removeEventListener(key, this._elementEvents[key]);
+		}
+		this._elementEvents = null;
+		this._callbackMap = null;
 	};
 
 	return VisibleSpacesEditor;
