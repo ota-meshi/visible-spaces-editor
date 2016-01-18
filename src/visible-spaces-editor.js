@@ -360,7 +360,7 @@
 		this._edit.innerText = value;
 		this._highlight();
 	};
-	VisibleSpacesEditor.prototype.EVENT_TYPES = CONSTS.EVENT_TYPES;
+	VisibleSpacesEditor.EVENT_TYPES = CONSTS.EVENT_TYPES;
 	VisibleSpacesEditor.prototype.on = function(eventType, fn) {
 		var funcs = this._callbackMap[eventType] || (this._callbackMap[eventType] = []);
 		funcs.push(fn);
