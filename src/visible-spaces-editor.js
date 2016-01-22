@@ -1,12 +1,15 @@
 (function(global, factory) {
 	'use strict';
-	global.VisibleSpacesEditor = global.VisibleSpacesEditor || factory();
+	var VisibleSpacesEditor = factory();
+
+	global.VisibleSpacesEditor = global.VisibleSpacesEditor || VisibleSpacesEditor;
 
 	global.visiblespaces = global.visiblespaces || {
 		edit: function(contenteditableElement) {
 			return new global.VisibleSpacesEditor(contenteditableElement);
 		},
 	};
+	return VisibleSpacesEditor;
 })(this, function() {
 	'use strict';
 	var CONSTS = {
